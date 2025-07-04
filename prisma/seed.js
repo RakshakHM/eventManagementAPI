@@ -75,7 +75,7 @@ async function main() {
     data: {
       name: 'Cinematic Moments',
       category: 'cameras',
-      description: 'Premium videography services with top-of-the-line equipment and a team of award-winning cinematographers. Includes drone footage, same-day edits, and a photo booth.',
+      description: 'Premium videography services with top-of-the-line equipment.',
       price: 45000,
       rating: 4.9,
       reviewCount: 38,
@@ -83,7 +83,23 @@ async function main() {
       duration: 'Full day coverage',
       capacity: 'Any',
       featured: true,
-      image: '/service-images/camera3.jpeg',
+      image: cameraImages[2],
+      images: cameraImages.join(','),
+    },
+  });
+  await prisma.service.create({
+    data: {
+      name: 'Corporate Lens',
+      category: 'cameras',
+      description: 'Specialized photography for corporate events and conferences.',
+      price: 30000,
+      rating: 4.4,
+      reviewCount: 19,
+      location: 'Electronic City',
+      duration: 'As needed',
+      capacity: 'Any',
+      featured: false,
+      image: cameraImages[3],
       images: cameraImages.join(','),
     },
   });
@@ -134,7 +150,7 @@ async function main() {
     data: {
       name: 'Tamarind Tree',
       category: 'halls',
-      description: 'Beautiful heritage venue with garden views, elegant spaces, and dedicated bridal suite. Perfect for ceremonies and receptions with a touch of history.',
+      description: 'Beautiful heritage venue with garden views and elegant spaces.',
       price: 200000,
       rating: 4.7,
       reviewCount: 42,
@@ -142,7 +158,23 @@ async function main() {
       duration: 'Full day',
       capacity: '300',
       featured: true,
-      image: '/service-images/hall3.jpeg',
+      image: hallImages[2],
+      images: hallImages.join(','),
+    },
+  });
+  await prisma.service.create({
+    data: {
+      name: 'Lalbagh Garden Party Venue',
+      category: 'halls',
+      description: 'Outdoor venue near Lalbagh Botanical Garden, perfect for daytime events.',
+      price: 80000,
+      rating: 4.6,
+      reviewCount: 25,
+      location: 'Lalbagh',
+      duration: 'Full day',
+      capacity: '150',
+      featured: false,
+      image: hallImages[3],
       images: hallImages.join(','),
     },
   });
@@ -193,7 +225,7 @@ async function main() {
     data: {
       name: 'Royal Decor',
       category: 'decorators',
-      description: 'Luxury decoration services for high-end events. Includes elaborate floral arrangements, custom lighting, premium linens, and personalized decor elements.',
+      description: 'Luxury decoration services for high-end events.',
       price: 75000,
       rating: 4.8,
       reviewCount: 31,
@@ -201,7 +233,23 @@ async function main() {
       duration: 'Setup day before event',
       capacity: 'Any',
       featured: true,
-      image: '/service-images/decor3.jpeg',
+      image: decorImages[2],
+      images: decorImages.join(','),
+    },
+  });
+  await prisma.service.create({
+    data: {
+      name: 'Bangalore Theme Decorators',
+      category: 'decorators',
+      description: 'Custom themed decorations for special events.',
+      price: 50000,
+      rating: 4.7,
+      reviewCount: 33,
+      location: 'Malleshwaram',
+      duration: 'Setup 1-2 days before event',
+      capacity: 'Any',
+      featured: false,
+      image: decorImages[3],
       images: decorImages.join(','),
     },
   });
