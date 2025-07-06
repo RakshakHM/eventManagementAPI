@@ -166,6 +166,62 @@ router.get('/bookings', async (req, res) => {
   }
 });
 
+// Get bookings for a specific service (for debugging)
+router.get('/bookings/service/:serviceId', async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+    const bookings = await prisma.booking.findMany({
+      where: {
+        serviceId: Number(serviceId),
+        status: { not: 'cancelled' },
+      },
+      include: { user: true, service: true },
+      orderBy: { date: 'asc' }
+    });
+    res.json(bookings);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+// Check availability for a service on a specific date
+router.get('/availability/:serviceId/:date', async (req, res) => {
+  try {
+    const { serviceId, date } = req.params;
+    const checkDate = new Date(date);
+    // Use UTC for start and end of day
+    const startOfDay = new Date(Date.UTC(
+      checkDate.getUTCFullYear(),
+      checkDate.getUTCMonth(),
+      checkDate.getUTCDate(),
+      0, 0, 0, 0
+    ));
+    const endOfDay = new Date(Date.UTC(
+      checkDate.getUTCFullYear(),
+      checkDate.getUTCMonth(),
+      checkDate.getUTCDate(),
+      23, 59, 59, 999
+    ));
+    // Check if there's already a booking for this service on this date
+    const existingBooking = await prisma.booking.findFirst({
+      where: {
+        serviceId: Number(serviceId),
+        date: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+        status: { not: 'cancelled' },
+      },
+    });
+    res.json({
+      available: !existingBooking,
+      message: existingBooking ? 'This date is already booked' : 'Date is available'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check availability' });
+  }
+});
+
 // Create a new booking (with double-booking prevention)
 router.post('/bookings', authenticateToken, async (req, res) => {
   try {
@@ -174,11 +230,28 @@ router.post('/bookings', authenticateToken, async (req, res) => {
     if (!userId || !serviceId || !date) {
       return res.status(400).json({ error: 'userId, serviceId, and date are required' });
     }
+    const checkDate = new Date(date);
+    // Use UTC for start and end of day
+    const startOfDay = new Date(Date.UTC(
+      checkDate.getUTCFullYear(),
+      checkDate.getUTCMonth(),
+      checkDate.getUTCDate(),
+      0, 0, 0, 0
+    ));
+    const endOfDay = new Date(Date.UTC(
+      checkDate.getUTCFullYear(),
+      checkDate.getUTCMonth(),
+      checkDate.getUTCDate(),
+      23, 59, 59, 999
+    ));
     // Prevent double-booking: check if a booking exists for the same service and date
     const existing = await prisma.booking.findFirst({
       where: {
         serviceId: Number(serviceId),
-        date: new Date(date),
+        date: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
         status: { not: 'cancelled' },
       },
     });
@@ -189,7 +262,7 @@ router.post('/bookings', authenticateToken, async (req, res) => {
       data: {
         userId: Number(userId),
         serviceId: Number(serviceId),
-        date: new Date(date),
+        date: startOfDay, // Store at UTC start of day for consistency
         price: price || 0,
         status: status || 'confirmed',
       },
