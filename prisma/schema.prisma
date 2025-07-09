@@ -36,7 +36,7 @@ model Service {
   capacity    String
   featured    Boolean
   image       String
-  images      String // Comma-separated URLs
+  images      String @db.Text // Comma-separated URLs, now allows long lists
   bookings    Booking[]
   reviews     Review[]
 }

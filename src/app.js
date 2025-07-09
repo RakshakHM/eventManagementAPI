@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const { PrismaClient } = require('@prisma/client');
 const cors = require('cors');
+const path = require('path');
 
 dotenv.config();
 const app = express();
@@ -16,6 +17,9 @@ app.use(cors({
   ],
   credentials: true
 }));
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Import and use API routes
 const apiRoutes = require('./routes');

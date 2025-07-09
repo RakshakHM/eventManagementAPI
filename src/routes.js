@@ -4,6 +4,22 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Set up multer storage for service images
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, '../public/service-images/'));
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    // Use Date.now(), a random number, and the original filename for uniqueness
+    cb(null, `service_${req.params.id}_${Date.now()}_${Math.round(Math.random() * 1e9)}_${file.originalname}`);
+  },
+});
+const upload = multer({ storage });
 
 // --- SERVICES CRUD ---
 
@@ -73,14 +89,114 @@ router.patch('/services/:id', async (req, res) => {
   }
 });
 
-// Delete a service
+// Update the DELETE /services/:id endpoint to prevent deletion if bookings exist
 router.delete('/services/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    // Check for existing bookings
+    const bookingCount = await prisma.booking.count({ where: { serviceId: id } });
+    if (bookingCount > 0) {
+      return res.status(400).json({ error: 'Cannot delete service with existing bookings.' });
+    }
     await prisma.service.delete({ where: { id } });
     res.status(204).end();
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete service' });
+  }
+});
+
+// Upload/replace service image
+router.post('/services/:id/image', upload.single('image'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+    // Remove old image if exists
+    const service = await prisma.service.findUnique({ where: { id } });
+    if (service && service.image) {
+      const oldPath = path.join(__dirname, '../public/service-images/', path.basename(service.image));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    // Save new image path (relative to public)
+    const imagePath = `/service-images/${req.file.filename}`;
+    const updated = await prisma.service.update({ where: { id }, data: { image: imagePath } });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+// Remove service image
+router.delete('/services/:id/image', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const service = await prisma.service.findUnique({ where: { id } });
+    if (service && service.image) {
+      const imgPath = path.join(__dirname, '../public/service-images/', path.basename(service.image));
+      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+    }
+    const updated = await prisma.service.update({ where: { id }, data: { image: '' } });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove image' });
+  }
+});
+
+// --- GALLERY IMAGES ---
+// Upload multiple gallery images
+router.post('/services/:id/gallery', upload.array('images'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No images uploaded' });
+    const service = await prisma.service.findUnique({ where: { id } });
+    let gallery = [];
+    if (service && service.images) {
+      gallery = service.images.split(',').filter(Boolean);
+    }
+    // ENFORCE LIMIT: Only allow up to 4 gallery images
+    if (gallery.length + req.files.length > 4) {
+      return res.status(400).json({ error: 'Maximum of 4 gallery images allowed.' });
+    }
+    // Save new image paths (relative to public)
+    const newImages = req.files.map(file => `/service-images/${file.filename}`);
+    const updatedGallery = [...gallery, ...newImages];
+    const updated = await prisma.service.update({ where: { id }, data: { images: updatedGallery.join(',') } });
+    res.json(updated);
+  } catch (error) {
+    console.error("Gallery upload error:", error); // Log the real error
+    res.status(500).json({ error: 'Failed to upload gallery images' });
+  }
+});
+
+// Remove a gallery image
+router.delete('/services/:id/gallery/:imageName', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { imageName } = req.params;
+    const service = await prisma.service.findUnique({ where: { id } });
+    if (!service) return res.status(404).json({ error: 'Service not found' });
+    let gallery = service.images ? service.images.split(',').filter(Boolean) : [];
+    const imagePath = `/service-images/${imageName}`;
+    gallery = gallery.filter(img => img !== imagePath);
+    // Delete file from disk
+    const filePath = path.join(__dirname, '../public/service-images/', imageName);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const updated = await prisma.service.update({ where: { id }, data: { images: gallery.join(',') } });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to remove gallery image' });
+  }
+});
+
+// Reorder gallery images
+router.patch('/services/:id/gallery', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { images } = req.body; // images: array of image paths
+    if (!Array.isArray(images)) return res.status(400).json({ error: 'Images must be an array' });
+    const updated = await prisma.service.update({ where: { id }, data: { images: images.join(',') } });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to reorder gallery images' });
   }
 });
 
@@ -273,6 +389,24 @@ router.post('/bookings', authenticateToken, async (req, res) => {
   }
 });
 
+// Update a booking's status
+router.patch('/bookings/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { status } = req.body;
+    if (!['confirmed', 'cancelled'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status },
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update booking status' });
+  }
+});
+
 // --- REVIEWS ---
 router.get('/reviews', async (req, res) => {
   try {
@@ -282,6 +416,48 @@ router.get('/reviews', async (req, res) => {
     res.json(reviews);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch reviews' });
+  }
+});
+
+// Admin dashboard stats endpoint
+router.get('/admin/stats', async (req, res) => {
+  try {
+    // Total bookings
+    const totalBookings = await prisma.booking.count();
+    // Total revenue
+    const totalRevenueResult = await prisma.booking.aggregate({ _sum: { price: true } });
+    const totalRevenue = totalRevenueResult._sum.price || 0;
+    // Bookings by status
+    const confirmedBookings = await prisma.booking.count({ where: { status: 'confirmed' } });
+    const cancelledBookings = await prisma.booking.count({ where: { status: 'cancelled' } });
+    // Most popular services (top 3 by booking count)
+    const popularServices = await prisma.booking.groupBy({
+      by: ['serviceId'],
+      _count: { serviceId: true },
+      orderBy: { _count: { serviceId: 'desc' } },
+      take: 3,
+    });
+    // Get service details for popular services
+    const popularServiceDetails = await Promise.all(
+      popularServices.map(async (s) => {
+        const service = await prisma.service.findUnique({ where: { id: s.serviceId } });
+        return { ...service, bookingCount: s._count.serviceId };
+      })
+    );
+    // Total number of services
+    const totalServices = await prisma.service.count();
+    res.json({
+      totalBookings,
+      totalRevenue,
+      bookingsByStatus: {
+        confirmed: confirmedBookings,
+        cancelled: cancelledBookings,
+      },
+      popularServices: popularServiceDetails,
+      totalServices,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch admin stats' });
   }
 });
 
