@@ -271,9 +271,11 @@ function authenticateToken(req, res, next) {
 }
 
 // --- BOOKINGS ---
-router.get('/bookings', async (req, res) => {
+router.get('/bookings', authenticateToken, async (req, res) => {
   try {
+    const userId = req.user.userId;
     const bookings = await prisma.booking.findMany({
+      where: { userId: Number(userId) },
       include: { user: true, service: true }
     });
     res.json(bookings);

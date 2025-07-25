@@ -1,11 +1,51 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const bcrypt = require('bcryptjs');
 
 async function main() {
   // Clean up existing data
   await prisma.booking.deleteMany();
   await prisma.review.deleteMany();
   await prisma.service.deleteMany();
+
+  // Upsert admin user with hashed password
+  const adminPassword = await bcrypt.hash('admin123', 10);
+  await prisma.user.upsert({
+    where: { email: 'admin@example.com' },
+    update: {},
+    create: {
+      name: 'Admin User',
+      email: 'admin@example.com',
+      password: adminPassword,
+      role: 'admin',
+    },
+  });
+
+  // Upsert another admin user with password '12345'
+  const anotherAdminPassword = await bcrypt.hash('12345', 10);
+  await prisma.user.upsert({
+    where: { email: 'admin2@example.com' },
+    update: {},
+    create: {
+      name: 'Another Admin',
+      email: 'admin2@example.com',
+      password: anotherAdminPassword,
+      role: 'admin',
+    },
+  });
+
+  // Upsert third admin user with password 'adminpass'
+  const thirdAdminPassword = await bcrypt.hash('adminpass', 10);
+  await prisma.user.upsert({
+    where: { email: 'admin3@example.com' },
+    update: {},
+    create: {
+      name: 'Third Admin',
+      email: 'admin3@example.com',
+      password: thirdAdminPassword,
+      role: 'admin',
+    },
+  });
 
   // Upsert users
   const user1 = await prisma.user.upsert({
