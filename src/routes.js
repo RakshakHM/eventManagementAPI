@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const cloudinary = require('../cloudinary'); // Add this import at the top
 
 // Set up multer storage for service images
 const storage = multer.diskStorage({
@@ -110,15 +111,15 @@ router.post('/services/:id/image', upload.single('image'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-    // Remove old image if exists
-    const service = await prisma.service.findUnique({ where: { id } });
-    if (service && service.image) {
-      const oldPath = path.join(__dirname, '../public/service-images/', path.basename(service.image));
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-    // Save new image path (relative to public)
-    const imagePath = `/service-images/${req.file.filename}`;
-    const updated = await prisma.service.update({ where: { id }, data: { image: imagePath } });
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: 'service-images'
+    });
+    // Remove local file
+    fs.unlinkSync(req.file.path);
+    // Remove old image if exists (no need to delete from Cloudinary in this simple version)
+    // Save new image URL from Cloudinary
+    const updated = await prisma.service.update({ where: { id }, data: { image: result.secure_url } });
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to upload image' });
@@ -156,8 +157,13 @@ router.post('/services/:id/gallery', upload.array('images'), async (req, res) =>
     if (gallery.length + req.files.length > 4) {
       return res.status(400).json({ error: 'Maximum of 4 gallery images allowed.' });
     }
-    // Save new image paths (relative to public)
-    const newImages = req.files.map(file => `/service-images/${file.filename}`);
+    // Upload each image to Cloudinary and collect URLs
+    const newImages = [];
+    for (const file of req.files) {
+      const result = await cloudinary.uploader.upload(file.path, { folder: 'service-images' });
+      newImages.push(result.secure_url);
+      fs.unlinkSync(file.path);
+    }
     const updatedGallery = [...gallery, ...newImages];
     const updated = await prisma.service.update({ where: { id }, data: { images: updatedGallery.join(',') } });
     res.json(updated);

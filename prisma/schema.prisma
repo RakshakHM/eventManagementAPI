@@ -21,6 +21,8 @@ model User {
   role     String  // "user" or "admin"
   bookings Booking[]
   reviews  Review[]
+  emailConfirmed    Boolean  @default(false)
+  emailConfirmToken String?
 }
 
 model Service {
