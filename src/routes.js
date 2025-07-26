@@ -8,6 +8,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const cloudinary = require('../cloudinary'); // Add this import at the top
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 
 // Set up multer storage for service images
 const storage = multer.diskStorage({
@@ -21,6 +23,18 @@ const storage = multer.diskStorage({
   },
 });
 const upload = multer({ storage });
+
+// Set up nodemailer transporter (use environment variables for credentials)
+let transporter = null;
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+}
 
 // --- SERVICES CRUD ---
 
@@ -80,12 +94,14 @@ router.patch('/services/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const data = req.body;
+    console.log('Updating service:', id, 'with data:', data);
     const updated = await prisma.service.update({
       where: { id },
       data,
     });
     res.json(updated);
   } catch (error) {
+    console.error('Service update error:', error);
     res.status(500).json({ error: 'Failed to update service' });
   }
 });
@@ -230,14 +246,64 @@ router.post('/users', async (req, res) => {
     }
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
+    // Generate email confirmation token
+    const emailConfirmToken = crypto.randomBytes(32).toString('hex');
     const user = await prisma.user.create({
-      data: { name, email, password: hashedPassword, role: role || 'user' },
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        role: role || 'user',
+        emailConfirmed: false,
+        emailConfirmToken,
+      },
     });
-    // Create JWT
-    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, 'your_jwt_secret', { expiresIn: '7d' });
-    res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role, token });
+    // Send confirmation email (if email is configured)
+    if (transporter) {
+      try {
+        const confirmUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/confirm-email?token=${emailConfirmToken}`;
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: user.email,
+          subject: 'Confirm your email',
+          html: `<p>Hi ${user.name},</p><p>Please confirm your email by clicking the link below:</p><p><a href="${confirmUrl}">${confirmUrl}</a></p>`,
+        });
+        res.status(201).json({ message: 'Registration successful. Please check your email to confirm your account.' });
+      } catch (emailError) {
+        console.error('Email sending failed:', emailError);
+        // Still create the user but inform about email issue
+        res.status(201).json({ 
+          message: 'Registration successful. Please check your email to confirm your account.',
+          warning: 'Email confirmation may be delayed. Please check your spam folder or contact support if you don\'t receive the email.'
+        });
+      }
+    } else {
+      // Email not configured - still create user but inform about manual confirmation needed
+      res.status(201).json({ 
+        message: 'Registration successful. Please check your email to confirm your account.',
+        warning: 'Email confirmation is not configured. Please contact support to confirm your account.'
+      });
+    }
   } catch (error) {
+    console.error('Registration error:', error);
     res.status(500).json({ error: 'Failed to register user' });
+  }
+});
+
+// Email confirmation endpoint
+router.get('/confirm-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'Missing token' });
+    const user = await prisma.user.findFirst({ where: { emailConfirmToken: token } });
+    if (!user) return res.status(400).json({ error: 'Invalid or expired token' });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { emailConfirmed: true, emailConfirmToken: null },
+    });
+    res.json({ message: 'Email confirmed successfully. You can now log in.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to confirm email' });
   }
 });
 
@@ -251,6 +317,9 @@ router.post('/login', async (req, res) => {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+    if (!user.emailConfirmed) {
+      return res.status(403).json({ error: 'Please confirm your email before logging in.' });
     }
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) {
@@ -390,7 +459,25 @@ router.post('/bookings', authenticateToken, async (req, res) => {
         price: price || 0,
         status: status || 'confirmed',
       },
+      include: { user: true, service: true },
     });
+    // Send confirmation email if status is confirmed
+    if ((status === 'confirmed' || !status) && transporter) {
+      try {
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: booking.user.email,
+          subject: 'Your Booking is Confirmed!',
+          html: `<p>Hi ${booking.user.name},</p>
+            <p>Your booking for <b>${booking.service.name}</b> has been <b>confirmed</b>.</p>
+            <p><b>Date:</b> ${new Date(booking.date).toLocaleDateString()}</p>
+            <p><b>Price:</b> $${booking.price}</p>
+            <p>Thank you for booking with us!</p>`
+        });
+      } catch (emailError) {
+        console.error('Booking confirmation email failed:', emailError);
+      }
+    }
     res.status(201).json(booking);
   } catch (error) {
     res.status(500).json({ error: 'Failed to create booking' });
@@ -408,7 +495,25 @@ router.patch('/bookings/:id', async (req, res) => {
     const updated = await prisma.booking.update({
       where: { id },
       data: { status },
+      include: { user: true, service: true },
     });
+    // Send confirmation email if status is confirmed
+    if (status === 'confirmed' && transporter) {
+      try {
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: updated.user.email,
+          subject: 'Your Booking is Confirmed!',
+          html: `<p>Hi ${updated.user.name},</p>
+            <p>Your booking for <b>${updated.service.name}</b> has been <b>confirmed</b>.</p>
+            <p><b>Date:</b> ${new Date(updated.date).toLocaleDateString()}</p>
+            <p><b>Price:</b> $${updated.price}</p>
+            <p>Thank you for booking with us!</p>`
+        });
+      } catch (emailError) {
+        console.error('Booking confirmation email failed:', emailError);
+      }
+    }
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update booking status' });
