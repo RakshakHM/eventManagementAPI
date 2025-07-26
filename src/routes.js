@@ -197,14 +197,50 @@ router.delete('/services/:id/gallery/:imageName', async (req, res) => {
     const service = await prisma.service.findUnique({ where: { id } });
     if (!service) return res.status(404).json({ error: 'Service not found' });
     let gallery = service.images ? service.images.split(',').filter(Boolean) : [];
-    const imagePath = `/service-images/${imageName}`;
-    gallery = gallery.filter(img => img !== imagePath);
-    // Delete file from disk
-    const filePath = path.join(__dirname, '../public/service-images/', imageName);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    
+    // Find the image to remove by matching the filename in the URL
+    const imageToRemove = gallery.find(img => {
+      // Handle both Cloudinary URLs and local paths
+      if (img.includes('cloudinary.com')) {
+        // Extract filename from Cloudinary URL
+        const urlParts = img.split('/');
+        const filename = urlParts[urlParts.length - 1];
+        return filename === imageName || filename.includes(imageName);
+      } else {
+        // Handle local paths
+        return img.includes(imageName);
+      }
+    });
+    
+    if (!imageToRemove) {
+      return res.status(404).json({ error: 'Image not found in gallery' });
+    }
+    
+    // Remove the image from the gallery array
+    gallery = gallery.filter(img => img !== imageToRemove);
+    
+    // Delete from Cloudinary if it's a Cloudinary URL
+    if (imageToRemove.includes('cloudinary.com')) {
+      try {
+        // Extract public_id from Cloudinary URL for deletion
+        const urlParts = imageToRemove.split('/');
+        const filename = urlParts[urlParts.length - 1];
+        const publicId = `service-images/${filename.split('.')[0]}`;
+        await cloudinary.uploader.destroy(publicId);
+      } catch (cloudinaryError) {
+        console.error('Failed to delete from Cloudinary:', cloudinaryError);
+        // Continue with database update even if Cloudinary deletion fails
+      }
+    } else {
+      // Delete local file if it exists
+      const filePath = path.join(__dirname, '../public/service-images/', imageName);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    
     const updated = await prisma.service.update({ where: { id }, data: { images: gallery.join(',') } });
     res.json(updated);
   } catch (error) {
+    console.error('Gallery removal error:', error);
     res.status(500).json({ error: 'Failed to remove gallery image' });
   }
 });
