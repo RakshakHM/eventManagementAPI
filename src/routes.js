@@ -385,9 +385,15 @@ function authenticateToken(req, res, next) {
 router.get('/bookings', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
+    const userRole = req.user.role;
+    
+    // If user is admin, return all bookings. Otherwise, return only user's bookings
+    const whereClause = userRole === 'admin' ? {} : { userId: Number(userId) };
+    
     const bookings = await prisma.booking.findMany({
-      where: { userId: Number(userId) },
-      include: { user: true, service: true }
+      where: whereClause,
+      include: { user: true, service: true },
+      orderBy: { date: 'desc' } // Order by date for better admin view
     });
     res.json(bookings);
   } catch (error) {
